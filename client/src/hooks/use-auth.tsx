@@ -1,6 +1,6 @@
-import { createContext, ReactNode, useContext, useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { createContext, ReactNode, useContext } from "react";
+import { useQuery, useMutation, UseMutationResult } from "@tanstack/react-query";
+import { apiRequest, queryClient, getQueryFn } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 interface User {
@@ -8,138 +8,115 @@ interface User {
   username: string;
 }
 
+type LoginData = {
+  username: string;
+  password: string;
+};
+
+type RegisterData = {
+  username: string;
+  password: string;
+};
+
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string) => Promise<void>;
-  logout: () => void;
+  error: Error | null;
+  loginMutation: UseMutationResult<User, Error, LoginData>;
+  logoutMutation: UseMutationResult<void, Error, void>;
+  registerMutation: UseMutationResult<User, Error, RegisterData>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
+  
+  // Fetch the current user
+  const {
+    data: user,
+    error,
+    isLoading,
+  } = useQuery<User | null, Error>({
+    queryKey: ["/api/user"],
+    queryFn: getQueryFn({ on401: "returnNull" }),
+  });
 
-  // Check for existing auth on mount
-  useEffect(() => {
-    const userId = localStorage.getItem("userId");
-    const username = localStorage.getItem("username");
-    
-    if (userId && username) {
-      setUser({
-        id: parseInt(userId),
-        username
-      });
-    }
-    
-    setIsLoading(false);
-  }, []);
-
-  const login = async (username: string, password: string) => {
-    setIsLoading(true);
-    
-    try {
-      const response = await apiRequest("POST", "/api/auth/login", { 
-        username, 
-        password 
-      });
-      
-      const userData = await response.json();
-      
-      localStorage.setItem("userId", userData.id.toString());
-      localStorage.setItem("username", userData.username);
-      
-      setUser({
-        id: userData.id,
-        username: userData.username
-      });
-      
+  const loginMutation = useMutation({
+    mutationFn: async (credentials: LoginData) => {
+      const res = await apiRequest("POST", "/api/login", credentials);
+      return await res.json();
+    },
+    onSuccess: (userData: User) => {
+      queryClient.setQueryData(["/api/user"], userData);
       toast({
         title: "Login successful!",
         description: `Welcome back, ${userData.username}!`,
       });
-      
       // Invalidate queries to refresh data
       queryClient.invalidateQueries({ queryKey: ["/api/habits"] });
       queryClient.invalidateQueries({ queryKey: ["/api/statistics"] });
-      
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Login failed";
+    },
+    onError: (error: Error) => {
       toast({
         title: "Login failed",
-        description: message,
+        description: error.message,
         variant: "destructive",
       });
-      
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    },
+  });
 
-  const register = async (username: string, password: string) => {
-    setIsLoading(true);
-    
-    try {
-      const response = await apiRequest("POST", "/api/auth/register", { 
-        username, 
-        password 
-      });
-      
-      const userData = await response.json();
-      
-      localStorage.setItem("userId", userData.id.toString());
-      localStorage.setItem("username", userData.username);
-      
-      setUser({
-        id: userData.id,
-        username: userData.username
-      });
-      
+  const registerMutation = useMutation({
+    mutationFn: async (credentials: RegisterData) => {
+      const res = await apiRequest("POST", "/api/register", credentials);
+      return await res.json();
+    },
+    onSuccess: (userData: User) => {
+      queryClient.setQueryData(["/api/user"], userData);
       toast({
         title: "Registration successful!",
         description: `Welcome, ${userData.username}!`,
       });
-      
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Registration failed";
+    },
+    onError: (error: Error) => {
       toast({
         title: "Registration failed",
-        description: message,
+        description: error.message,
         variant: "destructive",
       });
-      
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    },
+  });
 
-  const logout = () => {
-    localStorage.removeItem("userId");
-    localStorage.removeItem("username");
-    setUser(null);
-    
-    // Clear queries from cache
-    queryClient.clear();
-    
-    toast({
-      title: "Logged out",
-      description: "You have been logged out successfully.",
-    });
-  };
+  const logoutMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", "/api/logout");
+    },
+    onSuccess: () => {
+      queryClient.setQueryData(["/api/user"], null);
+      queryClient.clear();
+      toast({
+        title: "Logged out",
+        description: "You have been logged out successfully.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Logout failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   return (
     <AuthContext.Provider
       value={{
-        user,
+        user: user ?? null,
         isLoading,
-        login,
-        register,
-        logout
+        error,
+        loginMutation,
+        logoutMutation,
+        registerMutation
       }}
     >
       {children}

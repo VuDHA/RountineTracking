@@ -20,14 +20,14 @@ interface Category {
 
 export function Sidebar() {
   const [location] = useLocation();
-  const { user, logout } = useAuth();
+  const { user, logoutMutation } = useAuth();
   
   const { data: categories } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
   });
 
   const handleLogout = () => {
-    logout();
+    logoutMutation.mutate();
   };
 
   return (

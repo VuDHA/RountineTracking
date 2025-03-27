@@ -6,6 +6,11 @@ import {
   type HabitWithCategory, type HabitStatistics
 } from "@shared/schema";
 import { format, isToday, parseISO, startOfDay, subDays } from "date-fns";
+import { db } from "./db";
+import { eq, and, gte, desc, like, SQL, asc, sql } from "drizzle-orm";
+import session from "express-session";
+import connectPg from "connect-pg-simple";
+import { pool } from "./db";
 
 // Interface defining all storage operations
 export interface IStorage {
@@ -41,273 +46,295 @@ export interface IStorage {
   calculateStreaks(habitId: number): Promise<{ currentStreak: number, longestStreak: number }>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<number, User>;
-  private categories: Map<number, Category>;
-  private habits: Map<number, Habit>;
-  private habitCompletions: Map<number, HabitCompletion>;
-  
-  private userIdCounter: number;
-  private categoryIdCounter: number;
-  private habitIdCounter: number;
-  private habitCompletionIdCounter: number;
+export interface IStorageWithSession extends IStorage {
+  sessionStore: session.Store;
+}
+
+export class DatabaseStorage implements IStorageWithSession {
+  sessionStore: session.Store;
   
   constructor() {
-    this.users = new Map();
-    this.categories = new Map();
-    this.habits = new Map();
-    this.habitCompletions = new Map();
+    const PostgresSessionStore = connectPg(session);
+    this.sessionStore = new PostgresSessionStore({ 
+      pool,
+      createTableIfMissing: true,
+      tableName: 'user_sessions'
+    });
     
-    this.userIdCounter = 1;
-    this.categoryIdCounter = 1;
-    this.habitIdCounter = 1;
-    this.habitCompletionIdCounter = 1;
-    
-    // Initialize with default categories
+    // Check for default categories and add if none exist
     this.initializeDefaultData();
   }
   
-  private initializeDefaultData() {
-    // Add default categories
-    const defaultCategories = [
-      { name: "Health", color: "#4F46E5" },
-      { name: "Productivity", color: "#10B981" },
-      { name: "Learning", color: "#8B5CF6" },
-      { name: "Wellness", color: "#F59E0B" },
-    ];
+  private async initializeDefaultData() {
+    // Check if we have any categories
+    const existingCategories = await this.getCategories();
     
-    defaultCategories.forEach(category => {
-      this.createCategory({ name: category.name, color: category.color });
-    });
+    if (existingCategories.length === 0) {
+      // Add default categories
+      const defaultCategories = [
+        { name: "Health", color: "#4F46E5" },
+        { name: "Productivity", color: "#10B981" },
+        { name: "Learning", color: "#8B5CF6" },
+        { name: "Wellness", color: "#F59E0B" },
+      ];
+      
+      for (const category of defaultCategories) {
+        await this.createCategory({ name: category.name, color: category.color });
+      }
+    }
   }
   
   // User operations
   async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
   }
   
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user;
   }
   
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.userIdCounter++;
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
+    const [user] = await db.insert(users).values(insertUser).returning();
     return user;
   }
   
   // Category operations
   async getCategories(): Promise<Category[]> {
-    return Array.from(this.categories.values());
+    return await db.select().from(categories);
   }
   
   async getCategory(id: number): Promise<Category | undefined> {
-    return this.categories.get(id);
+    const [category] = await db.select().from(categories).where(eq(categories.id, id));
+    return category;
   }
   
   async createCategory(insertCategory: InsertCategory): Promise<Category> {
-    const id = this.categoryIdCounter++;
-    const category: Category = { ...insertCategory, id };
-    this.categories.set(id, category);
+    const [category] = await db.insert(categories).values(insertCategory).returning();
     return category;
   }
   
   // Habit operations
   async getHabits(userId?: number): Promise<Habit[]> {
     if (userId) {
-      return Array.from(this.habits.values()).filter(habit => habit.userId === userId);
+      return await db.select().from(habits).where(eq(habits.userId, userId));
     }
-    return Array.from(this.habits.values());
+    return await db.select().from(habits);
   }
   
   async getHabit(id: number): Promise<Habit | undefined> {
-    return this.habits.get(id);
+    const [habit] = await db.select().from(habits).where(eq(habits.id, id));
+    return habit;
   }
   
   async createHabit(insertHabit: InsertHabit): Promise<Habit> {
-    const id = this.habitIdCounter++;
-    const habit: Habit = { 
-      ...insertHabit, 
-      id, 
-      createdAt: new Date(),
+    // Ensure nullable fields are properly handled
+    const habitToInsert = {
+      ...insertHabit,
       description: insertHabit.description || null,
       reminderTime: insertHabit.reminderTime || null,
+      categoryId: insertHabit.categoryId || null,
+      userId: insertHabit.userId || null
     };
-    this.habits.set(id, habit);
+    
+    const [habit] = await db.insert(habits).values({
+      ...habitToInsert,
+      createdAt: new Date()
+    }).returning();
+    
     return habit;
   }
   
   async updateHabit(id: number, habitUpdate: Partial<InsertHabit>): Promise<Habit | undefined> {
-    const habit = this.habits.get(id);
-    if (!habit) return undefined;
+    const [updatedHabit] = await db.update(habits)
+      .set(habitUpdate)
+      .where(eq(habits.id, id))
+      .returning();
     
-    const updatedHabit: Habit = { ...habit, ...habitUpdate };
-    this.habits.set(id, updatedHabit);
     return updatedHabit;
   }
   
   async deleteHabit(id: number): Promise<boolean> {
-    return this.habits.delete(id);
+    const result = await db.delete(habits).where(eq(habits.id, id));
+    return true; // If execution reaches here without throwing an error, deletion was successful
   }
   
   // Habit completion operations
   async getHabitCompletions(habitId: number): Promise<HabitCompletion[]> {
-    return Array.from(this.habitCompletions.values())
-      .filter(completion => completion.habitId === habitId);
+    return await db.select()
+      .from(habitCompletions)
+      .where(eq(habitCompletions.habitId, habitId));
   }
   
   async getHabitCompletionsByDate(dateStr: string): Promise<HabitCompletion[]> {
     const date = startOfDay(new Date(dateStr));
     const formattedDate = format(date, 'yyyy-MM-dd');
     
-    return Array.from(this.habitCompletions.values())
-      .filter(completion => {
-        const completionDate = completion.completedAt instanceof Date 
-          ? format(completion.completedAt, 'yyyy-MM-dd')
-          : format(new Date(completion.completedAt), 'yyyy-MM-dd');
-        return completionDate === formattedDate;
-      });
+    // NOTE: This depends on how the date is stored in the database
+    // For PostgreSQL with Date type, we might need a different approach
+    return await db.select()
+      .from(habitCompletions)
+      .where(sql`DATE(${habitCompletions.completedAt}) = ${formattedDate}`);
   }
   
   async createHabitCompletion(insertCompletion: InsertHabitCompletion): Promise<HabitCompletion> {
-    const id = this.habitCompletionIdCounter++;
+    // Format date correctly for DB storage if needed
+    let completionToInsert = { ...insertCompletion };
     
-    // Ensure completedAt is a Date object
-    const completedAt = typeof insertCompletion.completedAt === 'string' 
-      ? new Date(insertCompletion.completedAt)
-      : insertCompletion.completedAt;
+    // Ensure userId is properly handled
+    if (completionToInsert.userId === undefined) {
+      completionToInsert.userId = null;
+    }
     
-    const completion: HabitCompletion = { 
-      ...insertCompletion, 
-      id,
-      completedAt
-    };
-    this.habitCompletions.set(id, completion);
+    // Insert the completion
+    const [completion] = await db.insert(habitCompletions)
+      .values(completionToInsert)
+      .returning();
+    
     return completion;
   }
   
   async updateHabitCompletion(id: number, completionUpdate: Partial<InsertHabitCompletion>): Promise<HabitCompletion | undefined> {
-    const completion = this.habitCompletions.get(id);
-    if (!completion) return undefined;
+    const [updatedCompletion] = await db.update(habitCompletions)
+      .set(completionUpdate)
+      .where(eq(habitCompletions.id, id))
+      .returning();
     
-    const updatedCompletion: HabitCompletion = { ...completion, ...completionUpdate };
-    this.habitCompletions.set(id, updatedCompletion);
     return updatedCompletion;
   }
   
   async deleteHabitCompletion(id: number): Promise<boolean> {
-    return this.habitCompletions.delete(id);
+    await db.delete(habitCompletions)
+      .where(eq(habitCompletions.id, id));
+    
+    return true;
   }
   
   async toggleHabitCompletion(habitId: number, dateStr: string, userId?: number): Promise<HabitCompletion> {
     const date = startOfDay(new Date(dateStr));
     const formattedDate = format(date, 'yyyy-MM-dd');
     
-    // Check if there's an existing completion record for this habit and date
-    const existingCompletion = Array.from(this.habitCompletions.values()).find(completion => {
-      const completionDate = format(
-        completion.completedAt instanceof Date 
-          ? completion.completedAt 
-          : new Date(completion.completedAt), 
-        'yyyy-MM-dd'
+    // Find existing completion record for this habit and date
+    const [existingCompletion] = await db.select()
+      .from(habitCompletions)
+      .where(
+        and(
+          eq(habitCompletions.habitId, habitId),
+          sql`DATE(${habitCompletions.completedAt}) = ${formattedDate}`
+        )
       );
-      return completion.habitId === habitId && completionDate === formattedDate;
-    });
     
     if (existingCompletion) {
       // Toggle the existing completion
-      const updatedCompletion = await this.updateHabitCompletion(
-        existingCompletion.id, 
-        { completed: !existingCompletion.completed }
-      );
-      return updatedCompletion!;
+      const [updatedCompletion] = await db.update(habitCompletions)
+        .set({ completed: !existingCompletion.completed })
+        .where(eq(habitCompletions.id, existingCompletion.id))
+        .returning();
+      
+      return updatedCompletion;
     } else {
       // Create a new completion record
-      const newCompletion = await this.createHabitCompletion({
+      return await this.createHabitCompletion({
         habitId,
         userId: userId || null,
-        completedAt: date,
+        completedAt: formattedDate, // Store as formatted date string
         completed: true
       });
-      return newCompletion;
     }
   }
   
   // Extended operations
   async getHabitsWithCategories(userId?: number): Promise<HabitWithCategory[]> {
-    const habits = userId 
-      ? Array.from(this.habits.values()).filter(habit => habit.userId === userId || habit.userId === null)
-      : Array.from(this.habits.values());
+    // Get habits with left join to categories
+    const habitsQuery = userId
+      ? db.select({
+          habit: habits,
+          category: categories
+        })
+        .from(habits)
+        .leftJoin(categories, eq(habits.categoryId, categories.id))
+        .where(eq(habits.userId, userId))
+      : db.select({
+          habit: habits,
+          category: categories
+        })
+        .from(habits)
+        .leftJoin(categories, eq(habits.categoryId, categories.id));
     
-    return Promise.all(habits.map(async habit => {
-      const category = habit.categoryId ? this.categories.get(habit.categoryId) : null;
+    const habitsData = await habitsQuery;
+    
+    // Process each habit with its category
+    return Promise.all(habitsData.map(async ({ habit, category }) => {
       const { currentStreak } = await this.calculateStreaks(habit.id);
       
       // Check if habit is completed today
       const today = format(new Date(), 'yyyy-MM-dd');
-      const todayCompletions = Array.from(this.habitCompletions.values())
-        .filter(completion => {
-          const completionDate = format(
-            completion.completedAt instanceof Date 
-              ? completion.completedAt 
-              : new Date(completion.completedAt), 
-            'yyyy-MM-dd'
-          );
-          return completion.habitId === habit.id && 
-                 completionDate === today && 
-                 completion.completed === true;
-        });
+      const [todayCompletion] = await db.select()
+        .from(habitCompletions)
+        .where(
+          and(
+            eq(habitCompletions.habitId, habit.id),
+            sql`DATE(${habitCompletions.completedAt}) = ${today}`,
+            eq(habitCompletions.completed, true)
+          )
+        );
       
       return {
         ...habit,
         category,
         currentStreak,
-        completedToday: todayCompletions.length > 0
+        completedToday: !!todayCompletion
       };
     }));
   }
   
   async getHabitWithCategory(id: number): Promise<HabitWithCategory | undefined> {
-    const habit = this.habits.get(id);
-    if (!habit) return undefined;
+    // Get habit with its category
+    const [habitData] = await db.select({
+      habit: habits,
+      category: categories
+    })
+    .from(habits)
+    .leftJoin(categories, eq(habits.categoryId, categories.id))
+    .where(eq(habits.id, id));
     
-    const category = habit.categoryId ? this.categories.get(habit.categoryId) : null;
+    if (!habitData) return undefined;
+    
+    const { habit, category } = habitData;
     const { currentStreak } = await this.calculateStreaks(habit.id);
     
     // Check if habit is completed today
     const today = format(new Date(), 'yyyy-MM-dd');
-    const todayCompletions = Array.from(this.habitCompletions.values())
-      .filter(completion => {
-        const completionDate = format(
-          completion.completedAt instanceof Date 
-            ? completion.completedAt 
-            : new Date(completion.completedAt), 
-          'yyyy-MM-dd'
-        );
-        return completion.habitId === habit.id && 
-               completionDate === today && 
-               completion.completed === true;
-      });
+    const [todayCompletion] = await db.select()
+      .from(habitCompletions)
+      .where(
+        and(
+          eq(habitCompletions.habitId, habit.id),
+          sql`DATE(${habitCompletions.completedAt}) = ${today}`,
+          eq(habitCompletions.completed, true)
+        )
+      );
     
     return {
       ...habit,
       category,
       currentStreak,
-      completedToday: todayCompletions.length > 0
+      completedToday: !!todayCompletion
     };
   }
   
   async calculateStreaks(habitId: number): Promise<{ currentStreak: number, longestStreak: number }> {
-    const completions = Array.from(this.habitCompletions.values())
-      .filter(completion => completion.habitId === habitId && completion.completed)
-      .sort((a, b) => {
-        const dateA = a.completedAt instanceof Date ? a.completedAt : new Date(a.completedAt);
-        const dateB = b.completedAt instanceof Date ? b.completedAt : new Date(b.completedAt);
-        return dateB.getTime() - dateA.getTime(); // Sort descending
-      });
+    // Get completed habit completions for this habit, ordered by date
+    const completions = await db.select()
+      .from(habitCompletions)
+      .where(
+        and(
+          eq(habitCompletions.habitId, habitId),
+          eq(habitCompletions.completed, true)
+        )
+      )
+      .orderBy(desc(habitCompletions.completedAt));
     
     if (completions.length === 0) {
       return { currentStreak: 0, longestStreak: 0 };
@@ -318,9 +345,7 @@ export class MemStorage implements IStorage {
     let currentStreakActive = true;
     
     // Check if the latest completion is today or yesterday
-    const latestDate = completions[0].completedAt instanceof Date 
-      ? completions[0].completedAt 
-      : new Date(completions[0].completedAt);
+    const latestDate = new Date(completions[0].completedAt);
     
     if (!isToday(latestDate) && latestDate < subDays(new Date(), 1)) {
       currentStreakActive = false;
@@ -331,9 +356,7 @@ export class MemStorage implements IStorage {
     let prevDate: Date | null = null;
     
     completions.forEach(completion => {
-      const completionDate = completion.completedAt instanceof Date 
-        ? completion.completedAt 
-        : new Date(completion.completedAt);
+      const completionDate = new Date(completion.completedAt);
       
       if (!prevDate) {
         tempStreak = 1;
@@ -396,25 +419,23 @@ export class MemStorage implements IStorage {
       const checkDate = subDays(today, i);
       const formattedDate = format(checkDate, 'yyyy-MM-dd');
       
-      habits.forEach(habit => {
+      for (const habit of habits) {
         possibleCompletions++;
         
-        const completed = Array.from(this.habitCompletions.values()).find(completion => {
-          const completionDate = format(
-            completion.completedAt instanceof Date 
-              ? completion.completedAt 
-              : new Date(completion.completedAt), 
-            'yyyy-MM-dd'
+        const [completed] = await db.select()
+          .from(habitCompletions)
+          .where(
+            and(
+              eq(habitCompletions.habitId, habit.id),
+              sql`DATE(${habitCompletions.completedAt}) = ${formattedDate}`,
+              eq(habitCompletions.completed, true)
+            )
           );
-          return completion.habitId === habit.id && 
-                 completionDate === formattedDate && 
-                 completion.completed === true;
-        });
         
         if (completed) {
           totalCompletions++;
         }
-      });
+      }
     }
     
     const completionRate = possibleCompletions > 0 
@@ -447,4 +468,4 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();

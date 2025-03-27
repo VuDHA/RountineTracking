@@ -32,7 +32,7 @@ type RegisterFormValues = z.infer<typeof registerSchema>;
 export default function AuthPage() {
   const [activeTab, setActiveTab] = useState<string>("login");
   const [, setLocation] = useLocation();
-  const { user, login, register: registerUser, isLoading } = useAuth();
+  const { user, loginMutation, registerMutation, isLoading } = useAuth();
 
   // Redirect if already logged in
   useEffect(() => {
@@ -59,21 +59,20 @@ export default function AuthPage() {
   });
 
   const onLogin = async (data: LoginFormValues) => {
-    try {
-      await login(data.username, data.password);
-      setLocation("/");
-    } catch (error) {
-      // Error is handled in the login function
-    }
+    loginMutation.mutate(data, {
+      onSuccess: () => {
+        setLocation("/");
+      }
+    });
   };
 
   const onRegister = async (data: RegisterFormValues) => {
-    try {
-      await registerUser(data.username, data.password);
-      setLocation("/");
-    } catch (error) {
-      // Error is handled in the register function
-    }
+    const { username, password } = data;
+    registerMutation.mutate({ username, password }, {
+      onSuccess: () => {
+        setLocation("/");
+      }
+    });
   };
 
   return (
@@ -105,7 +104,7 @@ export default function AuthPage() {
                               <Input 
                                 placeholder="Enter your username" 
                                 {...field} 
-                                disabled={isLoading}
+                                disabled={loginMutation.isPending || isLoading}
                               />
                             </FormControl>
                             <FormMessage />
@@ -124,7 +123,7 @@ export default function AuthPage() {
                                 type="password" 
                                 placeholder="Enter your password" 
                                 {...field} 
-                                disabled={isLoading}
+                                disabled={loginMutation.isPending || isLoading}
                               />
                             </FormControl>
                             <FormMessage />
@@ -132,8 +131,8 @@ export default function AuthPage() {
                         )}
                       />
 
-                      <Button type="submit" className="w-full" disabled={isLoading}>
-                        {isLoading ? "Logging in..." : "Login"}
+                      <Button type="submit" className="w-full" disabled={loginMutation.isPending || isLoading}>
+                        {loginMutation.isPending ? "Logging in..." : "Login"}
                       </Button>
                     </form>
                   </Form>
@@ -156,7 +155,7 @@ export default function AuthPage() {
                               <Input 
                                 placeholder="Choose a username" 
                                 {...field} 
-                                disabled={isLoading}
+                                disabled={registerMutation.isPending || isLoading}
                               />
                             </FormControl>
                             <FormMessage />
@@ -175,7 +174,7 @@ export default function AuthPage() {
                                 type="password" 
                                 placeholder="Create a password" 
                                 {...field} 
-                                disabled={isLoading}
+                                disabled={registerMutation.isPending || isLoading}
                               />
                             </FormControl>
                             <FormMessage />
@@ -194,7 +193,7 @@ export default function AuthPage() {
                                 type="password" 
                                 placeholder="Confirm your password" 
                                 {...field} 
-                                disabled={isLoading}
+                                disabled={registerMutation.isPending || isLoading}
                               />
                             </FormControl>
                             <FormMessage />
@@ -202,8 +201,8 @@ export default function AuthPage() {
                         )}
                       />
 
-                      <Button type="submit" className="w-full" disabled={isLoading}>
-                        {isLoading ? "Creating account..." : "Register"}
+                      <Button type="submit" className="w-full" disabled={registerMutation.isPending || isLoading}>
+                        {registerMutation.isPending ? "Creating account..." : "Register"}
                       </Button>
                     </form>
                   </Form>
