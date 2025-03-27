@@ -5,8 +5,17 @@ import {
   Settings,
   LayoutDashboard,
   PlusCircle,
+  LogOut,
+  User
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface MobileNavProps {
   onAddHabit: () => void;
@@ -62,6 +71,8 @@ export function MobileNav({ onAddHabit }: MobileNavProps) {
 }
 
 export function MobileHeader({ onMenuClick }: { onMenuClick: () => void }) {
+  const { user, logout } = useAuth();
+  
   return (
     <div className="md:hidden bg-white border-b border-gray-200 px-4 py-4 flex items-center justify-between sticky top-0 z-10">
       <div className="flex items-center">
@@ -70,14 +81,32 @@ export function MobileHeader({ onMenuClick }: { onMenuClick: () => void }) {
         </div>
         <h1 className="text-xl font-bold text-gray-800">HabitTrack</h1>
       </div>
-      <button 
-        onClick={onMenuClick}
-        className="p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-      </button>
+      
+      <div className="flex items-center gap-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/15">
+            <User className="h-4 w-4 text-primary" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem className="font-medium">
+              {user?.username || 'User'}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={logout}>
+              <LogOut className="mr-2 h-4 w-4" />
+              <span>Logout</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        
+        <button 
+          onClick={onMenuClick}
+          className="p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }

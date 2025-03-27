@@ -4,9 +4,13 @@ import {
   BarChart3,
   Settings,
   LayoutDashboard,
+  LogOut,
+  User,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
+import { Button } from "@/components/ui/button";
 
 interface Category {
   id: number;
@@ -16,10 +20,15 @@ interface Category {
 
 export function Sidebar() {
   const [location] = useLocation();
+  const { user, logout } = useAuth();
   
   const { data: categories } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
   });
+
+  const handleLogout = () => {
+    logout();
+  };
 
   return (
     <aside className="hidden md:flex md:flex-col md:w-72 md:fixed md:inset-y-0 bg-white shadow-lg z-10">
@@ -106,18 +115,29 @@ export function Sidebar() {
           </div>
         </nav>
         
-        {/* User Profile - placeholder for now */}
+        {/* User Profile */}
         <div className="px-6 py-4 border-t border-gray-200">
-          <div className="flex items-center">
-            <div className="flex-shrink-0 h-10 w-10">
-              <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                <span className="text-gray-500 font-medium">U</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <div className="flex-shrink-0 h-10 w-10">
+                <div className="h-10 w-10 rounded-full bg-primary/15 flex items-center justify-center">
+                  <User className="h-5 w-5 text-primary" />
+                </div>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm font-medium text-gray-800">{user?.username || 'User'}</p>
+                <p className="text-xs text-gray-500">Logged in</p>
               </div>
             </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-gray-800">User</p>
-              <p className="text-xs text-gray-500">View Profile</p>
-            </div>
+            <Button 
+              variant="ghost" 
+              size="icon"
+              onClick={handleLogout}
+              title="Logout"
+              className="text-gray-500 hover:text-primary"
+            >
+              <LogOut size={18} />
+            </Button>
           </div>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertHabitSchema, insertCategorySchema, insertHabitCompletionSchema } from "@shared/schema";
+import { insertHabitSchema, insertCategorySchema, insertHabitCompletionSchema, insertUserSchema } from "@shared/schema";
 import { ZodError } from "zod";
 import { format } from "date-fns";
 import { fromZodError } from "zod-validation-error";
@@ -163,6 +163,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const statistics = await storage.getHabitStatistics();
       res.json(statistics);
+    } catch (error) {
+      handleError(res, error);
+    }
+  });
+  
+  // Authentication
+  app.post("/api/auth/register", async (req: Request, res: Response) => {
+    try {
+      const parsed = insertUserSchema.parse(req.body);
+      
+      const existingUser = await storage.getUserByUsername(parsed.username);
+      if (existingUser) {
+        return res.status(409).json({ message: "Username already exists" });
+      }
+
+      const user = await storage.createUser(parsed);
+      
+      // Don't send password in response
+      const { password, ...userWithoutPassword } = user;
+      
+      res.status(201).json(userWithoutPassword);
+    } catch (error) {
+      handleError(res, error);
+    }
+  });
+
+  app.post("/api/auth/login", async (req: Request, res: Response) => {
+    try {
+      const { username, password } = req.body;
+      
+      if (!username || !password) {
+        return res.status(400).json({ message: "Username and password are required" });
+      }
+
+      const user = await storage.getUserByUsername(username);
+      
+      if (!user || user.password !== password) {
+        return res.status(401).json({ message: "Invalid username or password" });
+      }
+
+      // Don't send password in response
+      const { password: _, ...userWithoutPassword } = user;
+      
+      res.status(200).json(userWithoutPassword);
+    } catch (error) {
+      handleError(res, error);
+    }
+  });
+
+  app.get("/api/auth/me", async (req: Request, res: Response) => {
+    try {
+      const userId = req.query.userId as string | undefined;
+      
+      if (!userId) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      const user = await storage.getUser(parseInt(userId));
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Don't send password in response
+      const { password, ...userWithoutPassword } = user;
+      
+      res.status(200).json(userWithoutPassword);
     } catch (error) {
       handleError(res, error);
     }
