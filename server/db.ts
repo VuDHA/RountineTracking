@@ -3,7 +3,9 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import * as schema from "@shared/schema";
 
-if (!process.env.DATABASE_URL) {
+const url = 'postgresql://postgres:1@localhost:5432/habit';
+
+if (!url) {
   throw new Error(
     "DATABASE_URL must be set. Did you forget to provision a database?",
   );
@@ -11,8 +13,9 @@ if (!process.env.DATABASE_URL) {
 
 // Simplified connection - always use node-postgres
 const pgPool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: url,
   ssl: false, // Disable SSL for local connections
+  password: '1'
 });
 
 const db: NodePgDatabase<typeof schema> = drizzle(pgPool, { schema });
