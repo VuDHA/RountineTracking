@@ -16,7 +16,7 @@ A modern habit tracker application with visualization tools to monitor and analy
 
 - **Frontend**: React, TypeScript, TailwindCSS, Shadcn/UI
 - **Backend**: Express.js, TypeScript 
-- **Data Storage**: In-memory storage (can be easily replaced with PostgreSQL)
+- **Data Storage**: PostgreSQL with Drizzle ORM
 - **State Management**: TanStack React Query
 - **Routing**: Wouter
 - **Form Handling**: React Hook Form with Zod validation
@@ -37,10 +37,18 @@ A modern habit tracker application with visualization tools to monitor and analy
 │   ├── index.ts           # Server entry point
 │   ├── routes.ts          # API routes
 │   ├── storage.ts         # Data storage implementation
+│   ├── db.ts              # Database connection setup
+│   ├── auth.ts            # Authentication management
+│   ├── migrate.ts         # Database migration helpers
+│   ├── schema-push.ts     # Schema push utility
 │   └── vite.ts            # Vite server configuration
 ├── shared/                # Shared code between frontend and backend
 │   └── schema.ts          # Database schema and types
-└── package.json           # Project dependencies and scripts
+├── drizzle.config.ts      # Drizzle ORM configuration
+├── package.json           # Project dependencies and scripts
+├── tsconfig.json          # TypeScript configuration
+├── vite.config.ts         # Vite bundler configuration
+└── tailwind.config.ts     # Tailwind CSS configuration
 ```
 
 ## Screenshots
@@ -50,6 +58,44 @@ A modern habit tracker application with visualization tools to monitor and analy
 ## Getting Started
 
 See the [SETUP.md](SETUP.md) file for detailed instructions on how to set up and run the application locally.
+
+## Database Management
+
+The application uses PostgreSQL with Drizzle ORM for database management. Here are some important operations:
+
+### Running Migrations
+
+When you make changes to the database schema in `shared/schema.ts`, you need to run migrations to update the database:
+
+```bash
+# Push schema changes directly to the database
+npm run db:push
+```
+
+### Adding Mutations or Queries
+
+When adding new database operations:
+
+1. Update `shared/schema.ts` with any new models or fields
+2. Run migrations to update the database:
+   ```bash
+   npm run db:push
+   ```
+3. Implement the new storage operations in `server/storage.ts`
+4. Add any new API endpoints in `server/routes.ts`
+5. Use `queryClient` to invalidate relevant queries after mutations:
+   ```typescript
+   // After a successful mutation
+   queryClient.invalidateQueries({ queryKey: ['/api/yourEndpoint'] });
+   ```
+
+### Type Generation
+
+The Drizzle ORM automatically generates TypeScript types from your schema. After updating your schema:
+
+1. Use `typeof yourtable.$inferSelect` to generate select types
+2. Use `z.infer<typeof insertYourTableSchema>` to generate insert types
+3. Remember to export these types for use throughout the application
 
 ## Contributing
 

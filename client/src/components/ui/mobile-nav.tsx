@@ -71,7 +71,11 @@ export function MobileNav({ onAddHabit }: MobileNavProps) {
 }
 
 export function MobileHeader({ onMenuClick }: { onMenuClick: () => void }) {
-  const { user, logout } = useAuth();
+  const { user, logoutMutation } = useAuth();
+  
+  const handleLogout = () => {
+    logoutMutation.mutate();
+  };
   
   return (
     <div className="md:hidden bg-white border-b border-gray-200 px-4 py-4 flex items-center justify-between sticky top-0 z-10">
@@ -91,9 +95,9 @@ export function MobileHeader({ onMenuClick }: { onMenuClick: () => void }) {
             <DropdownMenuItem className="font-medium">
               {user?.username || 'User'}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={logout}>
+            <DropdownMenuItem onClick={handleLogout} disabled={logoutMutation.isPending}>
               <LogOut className="mr-2 h-4 w-4" />
-              <span>Logout</span>
+              <span>{logoutMutation.isPending ? "Logging out..." : "Logout"}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

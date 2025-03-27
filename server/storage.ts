@@ -10,7 +10,7 @@ import { db } from "./db";
 import { eq, and, gte, desc, like, SQL, asc, sql } from "drizzle-orm";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
-import { pool } from "./db";
+import pg from 'pg';
 
 // Interface defining all storage operations
 export interface IStorage {
@@ -33,7 +33,7 @@ export interface IStorage {
   
   // Habit completion operations
   getHabitCompletions(habitId: number): Promise<HabitCompletion[]>;
-  getHabitCompletionsByDate(date: string): Promise<HabitCompletion[]>;
+  getHabitCompletionsByDate(date: string, userId?: number): Promise<HabitCompletion[]>;
   createHabitCompletion(completion: InsertHabitCompletion): Promise<HabitCompletion>;
   updateHabitCompletion(id: number, completion: Partial<InsertHabitCompletion>): Promise<HabitCompletion | undefined>;
   deleteHabitCompletion(id: number): Promise<boolean>;
@@ -55,14 +55,29 @@ export class DatabaseStorage implements IStorageWithSession {
   
   constructor() {
     const PostgresSessionStore = connectPg(session);
+    
+    // Create a local pool for session store if needed
+    const pgPool = new pg.Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.DATABASE_URL?.startsWith('postgres://') || 
+           process.env.DATABASE_URL?.startsWith('postgresql://') 
+           ? false 
+           : { rejectUnauthorized: false }
+    });
+    
     this.sessionStore = new PostgresSessionStore({ 
-      pool,
+      pool: pgPool,
       createTableIfMissing: true,
       tableName: 'user_sessions'
     });
     
-    // Check for default categories and add if none exist
-    this.initializeDefaultData();
+    // Initialization of default data happens asynchronously
+    // after the database tables are created
+    setTimeout(() => {
+      this.initializeDefaultData().catch(err => {
+        console.error("Failed to initialize default data:", err);
+      });
+    }, 2000);
   }
   
   private async initializeDefaultData() {
@@ -167,15 +182,25 @@ export class DatabaseStorage implements IStorageWithSession {
       .where(eq(habitCompletions.habitId, habitId));
   }
   
-  async getHabitCompletionsByDate(dateStr: string): Promise<HabitCompletion[]> {
+  async getHabitCompletionsByDate(dateStr: string, userId?: number): Promise<HabitCompletion[]> {
     const date = startOfDay(new Date(dateStr));
     const formattedDate = format(date, 'yyyy-MM-dd');
     
-    // NOTE: This depends on how the date is stored in the database
-    // For PostgreSQL with Date type, we might need a different approach
-    return await db.select()
-      .from(habitCompletions)
-      .where(sql`DATE(${habitCompletions.completedAt}) = ${formattedDate}`);
+    // Build the query with user filter if provided
+    const query = userId
+      ? db.select()
+          .from(habitCompletions)
+          .where(
+            and(
+              sql`DATE(${habitCompletions.completedAt}) = ${formattedDate}`,
+              eq(habitCompletions.userId, userId)
+            )
+          )
+      : db.select()
+          .from(habitCompletions)
+          .where(sql`DATE(${habitCompletions.completedAt}) = ${formattedDate}`);
+    
+    return await query;
   }
   
   async createHabitCompletion(insertCompletion: InsertHabitCompletion): Promise<HabitCompletion> {
@@ -265,7 +290,7 @@ export class DatabaseStorage implements IStorageWithSession {
     const habitsData = await habitsQuery;
     
     // Process each habit with its category
-    return Promise.all(habitsData.map(async ({ habit, category }) => {
+    return Promise.all(habitsData.map(async ({ habit, category }: { habit: Habit, category: Category | null }) => {
       const { currentStreak } = await this.calculateStreaks(habit.id);
       
       // Check if habit is completed today
@@ -355,7 +380,7 @@ export class DatabaseStorage implements IStorageWithSession {
     let tempStreak = 0;
     let prevDate: Date | null = null;
     
-    completions.forEach(completion => {
+    completions.forEach((completion: HabitCompletion) => {
       const completionDate = new Date(completion.completedAt);
       
       if (!prevDate) {
