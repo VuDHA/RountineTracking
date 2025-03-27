@@ -56,11 +56,44 @@ export class DatabaseStorage implements IStorageWithSession {
   constructor() {
     const PostgresSessionStore = connectPg(session);
     
-    // Create a simplified pool for session store
-    const pgPool = new pg.Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: false // Disable SSL for local connections
-    });
+    // Try environment variable first, fallback to local hardcoded value if needed
+    const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:1@localhost:5432/habit';
+    
+    // For local development in Windows environments
+    let pgConfig: pg.PoolConfig;
+    
+    if (connectionString.includes('localhost') || connectionString.includes('127.0.0.1')) {
+      // Parse the connection string manually for better control
+      try {
+        const url = new URL(connectionString);
+        pgConfig = {
+          host: url.hostname,
+          port: parseInt(url.port || '5432'),
+          database: url.pathname.substring(1), // Remove leading /
+          user: url.username || 'postgres',
+          password: url.password || '1',
+          ssl: false
+        };
+      } catch (err) {
+        console.error("Failed to parse connection string for session store, using direct config:", err);
+        pgConfig = {
+          host: 'localhost',
+          port: 5432,
+          database: 'habit',
+          user: 'postgres',
+          password: '1',
+          ssl: false
+        };
+      }
+    } else {
+      // For remote or production databases, use the connection string as-is
+      pgConfig = {
+        connectionString,
+        ssl: false // Adjust as needed
+      };
+    }
+    
+    const pgPool = new pg.Pool(pgConfig);
     
     this.sessionStore = new PostgresSessionStore({ 
       pool: pgPool,
@@ -69,30 +102,40 @@ export class DatabaseStorage implements IStorageWithSession {
     });
     
     // Initialization of default data happens asynchronously
-    // after the database tables are created
+    // after the database tables are created - with a longer delay to ensure schema is ready
     setTimeout(() => {
       this.initializeDefaultData().catch(err => {
         console.error("Failed to initialize default data:", err);
       });
-    }, 2000);
+    }, 5000);
   }
   
   private async initializeDefaultData() {
-    // Check if we have any categories
-    const existingCategories = await this.getCategories();
-    
-    if (existingCategories.length === 0) {
-      // Add default categories
-      const defaultCategories = [
-        { name: "Health", color: "#4F46E5" },
-        { name: "Productivity", color: "#10B981" },
-        { name: "Learning", color: "#8B5CF6" },
-        { name: "Wellness", color: "#F59E0B" },
-      ];
+    try {
+      console.log("Starting to initialize default data...");
+      // Check if we have any categories
+      const existingCategories = await this.getCategories();
+      console.log(`Found ${existingCategories.length} existing categories`);
       
-      for (const category of defaultCategories) {
-        await this.createCategory({ name: category.name, color: category.color });
+      if (existingCategories.length === 0) {
+        // Add default categories
+        const defaultCategories = [
+          { name: "Health", color: "#4F46E5" },
+          { name: "Productivity", color: "#10B981" },
+          { name: "Learning", color: "#8B5CF6" },
+          { name: "Wellness", color: "#F59E0B" },
+        ];
+        
+        console.log(`Inserting ${defaultCategories.length} default categories`);
+        for (const category of defaultCategories) {
+          await this.createCategory({ name: category.name, color: category.color });
+        }
+        console.log("Default categories created successfully");
       }
+    } catch (error) {
+      console.error("Error initializing default data:", error);
+      // Re-throw to be caught by the caller
+      throw error;
     }
   }
   

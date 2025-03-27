@@ -1,24 +1,14 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
-import pg from "pg";
+import { sql } from "drizzle-orm";
 import * as schema from "@shared/schema";
+import { db } from "./db";  // Reuse the same DB connection
 
 // This function pushes the schema directly to the database (no migrations)
 export async function pushSchema() {
   console.log("Starting schema push...");
   
-  // Use standard node-postgres for the connection
-  const pgPool = new pg.Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: false, // Disable SSL for local connections
-  });
-  
-  // Create a direct connection to the database
-  const db = drizzle(pgPool, { schema });
-  
   try {
-    // Create tables based on schema
-    await pgPool.query(`
+    // Use db directly from the imported db connection
+    await db.execute(sql`
       -- Users table
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -70,7 +60,5 @@ export async function pushSchema() {
     console.log("Schema push completed successfully");
   } catch (error) {
     console.error("Schema push failed:", error);
-  } finally {
-    await pgPool.end();
   }
 }
