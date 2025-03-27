@@ -7,16 +7,7 @@ import * as schema from "@shared/schema";
 export async function pushSchema() {
   console.log("Starting schema push...");
   
-  // Check if we're running locally (based on DATABASE_URL format)
-  const isLocal = process.env.DATABASE_URL?.startsWith('postgres://') || 
-                 process.env.DATABASE_URL?.startsWith('postgresql://');
-                 
-  if (!isLocal) {
-    console.log("Not using schema push in production environments");
-    return;
-  }
-  
-  // Use standard node-postgres for local development
+  // Use standard node-postgres for the connection
   const pgPool = new pg.Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: false, // Disable SSL for local connections

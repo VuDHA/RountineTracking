@@ -56,13 +56,10 @@ export class DatabaseStorage implements IStorageWithSession {
   constructor() {
     const PostgresSessionStore = connectPg(session);
     
-    // Create a local pool for session store if needed
+    // Create a simplified pool for session store
     const pgPool = new pg.Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_URL?.startsWith('postgres://') || 
-           process.env.DATABASE_URL?.startsWith('postgresql://') 
-           ? false 
-           : { rejectUnauthorized: false }
+      ssl: false // Disable SSL for local connections
     });
     
     this.sessionStore = new PostgresSessionStore({ 
